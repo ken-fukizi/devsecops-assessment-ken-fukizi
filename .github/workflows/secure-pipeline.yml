@@ -1,0 +1,189 @@
+name: Secure Pipeline
+
+on:
+  push:
+    branches:
+      - candidate-assessment
+      - main
+  pull_request:
+    branches:
+      - "*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  security-pipeline:
+    name: DevSecOps Security Gate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup Python for Semgrep
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Prepare report directory
+        run: mkdir -p reports/security
+
+      - name: Internal scan (frontend)
+        run: |
+          node scripts/multi-scanner-orchestrator/security-scan.js \
+            --path country-flags-app-main \
+            --no-external \
+            --format json \
+            --output reports/security/internal-frontend.json
+
+      - name: Internal scan (backend)
+        run: |
+          node scripts/multi-scanner-orchestrator/security-scan.js \
+            --path country-service-main \
+            --no-external \
+            --format json \
+            --output reports/security/internal-backend.json
+
+      - name: Install Semgrep
+        run: python -m pip install --upgrade semgrep
+
+      - name: Semgrep scan
+        run: |
+          semgrep scan --config auto --json --output reports/security/semgrep.json .
+
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: json
+          output: reports/security/trivy.json
+          exit-code: "0"
+          scanners: vuln,secret,misconfig
+
+      - name: Aggregate findings and enforce quality gate
+        id: quality_gate
+        run: |
+          node - <<'EOF'
+          const fs = require("node:fs");
+
+          const totals = {
+            critical: 0,
+            high: 0,
+            medium: 0,
+            low: 0,
+            info: 0,
+            unknown: 0,
+          };
+
+          function addSeverity(severity) {
+            const normalized = String(severity || "unknown").toLowerCase();
+            if (!Object.prototype.hasOwnProperty.call(totals, normalized)) {
+              totals.unknown += 1;
+              return;
+            }
+            totals[normalized] += 1;
+          }
+
+          function readJson(filePath, defaultValue) {
+            if (!fs.existsSync(filePath)) {
+              return defaultValue;
+            }
+
+            const raw = fs.readFileSync(filePath, "utf8");
+            try {
+              return JSON.parse(raw);
+            } catch {
+              return defaultValue;
+            }
+          }
+
+          const internalFrontend = readJson("reports/security/internal-frontend.json", null);
+          const internalBackend = readJson("reports/security/internal-backend.json", null);
+
+          for (const internalReport of [internalFrontend, internalBackend]) {
+            if (!internalReport || !internalReport.summary || !internalReport.summary.bySeverity) {
+              continue;
+            }
+
+            for (const [severity, count] of Object.entries(internalReport.summary.bySeverity)) {
+              if (Object.prototype.hasOwnProperty.call(totals, severity)) {
+                totals[severity] += Number(count || 0);
+              }
+            }
+          }
+
+          const semgrepReport = readJson("reports/security/semgrep.json", { results: [] });
+          const semgrepSeverityMap = {
+            error: "high",
+            warning: "medium",
+            info: "low",
+          };
+
+          for (const finding of semgrepReport.results || []) {
+            const rawSeverity = String(finding?.extra?.severity || "info").toLowerCase();
+            addSeverity(semgrepSeverityMap[rawSeverity] || rawSeverity);
+          }
+
+          const trivyReport = readJson("reports/security/trivy.json", { Results: [] });
+          for (const result of trivyReport.Results || []) {
+            for (const vuln of result.Vulnerabilities || []) {
+              addSeverity(vuln.Severity);
+            }
+            for (const secret of result.Secrets || []) {
+              addSeverity(secret.Severity || "high");
+            }
+            for (const misconfig of result.Misconfigurations || []) {
+              addSeverity(misconfig.Severity);
+            }
+          }
+
+          const totalFindings = Object.values(totals).reduce((acc, count) => acc + count, 0);
+
+          let decision = "pass";
+          let exitCode = 0;
+
+          if (totals.critical > 0 || totals.high > 0) {
+            decision = "fail";
+            exitCode = 1;
+          } else if (totalFindings > 0) {
+            decision = "warn";
+          }
+
+          const summary = [
+            "## Security Quality Gate",
+            "",
+            `Decision: **${decision.toUpperCase()}**`,
+            "",
+            "| Severity | Count |",
+            "|---|---:|",
+            `| Critical | ${totals.critical} |`,
+            `| High | ${totals.high} |`,
+            `| Medium | ${totals.medium} |`,
+            `| Low | ${totals.low} |`,
+            `| Info | ${totals.info} |`,
+            `| Unknown | ${totals.unknown} |`,
+            "",
+            "Gate policy: FAIL on Critical/High, WARN on Medium/Low/Info, PASS on zero findings.",
+          ].join("\n");
+
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${summary}\n`);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `decision=${decision}\n`);
+
+          process.exit(exitCode);
+          EOF
+
+      - name: Upload security reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports
+          path: reports/security/
+          if-no-files-found: warn
