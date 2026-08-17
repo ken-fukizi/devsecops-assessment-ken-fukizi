@@ -65,7 +65,7 @@ Run tests:
 node --test tests/security-scan.test.js
 ```
 
-## Interview talking points
+## Design rationale
 
 - Why aggregation matters: one report, one decision signal, less noise.
 - Why internal plus external scanners: resilient local execution and stronger CI coverage.
