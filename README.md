@@ -38,6 +38,7 @@ Blocks 4 and 5 are deferred on purpose. The 3-hour timebox is four blocks; 1–3
     ├── architecture-design.md   # Block 6 (primary design document)
     ├── block-2-pipeline-security.md
     ├── block-3-container-security.md
+    ├── solution-notes.md        # Personal notes: how the provided apps fit
     └── architecture/diagrams/
 ```
 
