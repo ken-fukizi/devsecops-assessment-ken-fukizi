@@ -1,0 +1,48 @@
+name: devsecops-assessment
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: country-service-main/Dockerfile
+    image: country-service:secure
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    expose:
+      - "8081"
+    networks:
+      - app_net
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ..
+      dockerfile: application/Dockerfile
+      args:
+        REACT_APP_API_URL: http://api:8081
+    image: country-flags-web:secure
+    depends_on:
+      - api
+    ports:
+      - "8080:8080"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+      - /var/cache/nginx:size=32m,noexec,nosuid,nodev
+      - /var/run:size=16m,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - app_net
+    restart: unless-stopped
+
+networks:
+  app_net:
+    driver: bridge

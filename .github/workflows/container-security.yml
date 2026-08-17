@@ -1,0 +1,144 @@
+name: Container Security
+
+on:
+  push:
+    branches:
+      - candidate-assessment
+      - main
+  pull_request:
+    branches:
+      - "*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan-containers:
+    name: Build and Scan Container Images
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Create reports directory
+        run: mkdir -p reports/container-security
+
+      - name: Build API image
+        run: |
+          docker build \
+            --file country-service-main/Dockerfile \
+            --tag country-service:secure \
+            .
+
+      - name: Build Web image
+        run: |
+          docker build \
+            --file application/Dockerfile \
+            --build-arg REACT_APP_API_URL=http://api:8081 \
+            --tag country-flags-web:secure \
+            .
+
+      - name: Trivy scan API image
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: country-service:secure
+          format: json
+          output: reports/container-security/trivy-api.json
+          severity: CRITICAL,HIGH,MEDIUM,LOW
+          ignore-unfixed: true
+          exit-code: "0"
+
+      - name: Trivy scan Web image
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: country-flags-web:secure
+          format: json
+          output: reports/container-security/trivy-web.json
+          severity: CRITICAL,HIGH,MEDIUM,LOW
+          ignore-unfixed: true
+          exit-code: "0"
+
+      - name: Container quality gate
+        run: |
+          node - <<'EOF'
+          const fs = require("node:fs");
+
+          const reports = [
+            "reports/container-security/trivy-api.json",
+            "reports/container-security/trivy-web.json",
+          ];
+
+          const totals = {
+            critical: 0,
+            high: 0,
+            medium: 0,
+            low: 0,
+            unknown: 0,
+          };
+
+          function addSeverity(rawSeverity) {
+            const severity = String(rawSeverity || "unknown").toLowerCase();
+            if (!Object.prototype.hasOwnProperty.call(totals, severity)) {
+              totals.unknown += 1;
+              return;
+            }
+            totals[severity] += 1;
+          }
+
+          for (const reportPath of reports) {
+            if (!fs.existsSync(reportPath)) {
+              continue;
+            }
+
+            const parsed = JSON.parse(fs.readFileSync(reportPath, "utf8"));
+            for (const result of parsed.Results || []) {
+              for (const vuln of result.Vulnerabilities || []) {
+                addSeverity(vuln.Severity);
+              }
+            }
+          }
+
+          const totalFindings = Object.values(totals).reduce((sum, value) => sum + value, 0);
+
+          let decision = "pass";
+          let exitCode = 0;
+
+          if (totals.critical > 0 || totals.high > 0) {
+            decision = "fail";
+            exitCode = 1;
+          } else if (totalFindings > 0) {
+            decision = "warn";
+          }
+
+          const summary = [
+            "## Container Security Quality Gate",
+            "",
+            `Decision: **${decision.toUpperCase()}**`,
+            "",
+            "| Severity | Count |",
+            "|---|---:|",
+            `| Critical | ${totals.critical} |`,
+            `| High | ${totals.high} |`,
+            `| Medium | ${totals.medium} |`,
+            `| Low | ${totals.low} |`,
+            `| Unknown | ${totals.unknown} |`,
+            "",
+            "Gate policy: FAIL on Critical/High image vulnerabilities; WARN on Medium/Low; PASS on zero findings.",
+          ].join("\n");
+
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${summary}\n`);
+          process.exit(exitCode);
+          EOF
+
+      - name: Upload container scan reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: container-security-reports
+          path: reports/container-security/
+          if-no-files-found: warn
