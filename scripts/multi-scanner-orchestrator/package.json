@@ -1,0 +1,11 @@
+{
+  "name": "multi-scanner-orchestrator",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Block 1 security automation orchestrator",
+  "type": "commonjs",
+  "scripts": {
+    "scan": "node security-scan.js",
+    "test": "node --test tests/security-scan.test.js"
+  }
+}
