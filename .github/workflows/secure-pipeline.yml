@@ -20,7 +20,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -177,12 +177,18 @@ jobs:
           fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${summary}\n`);
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `decision=${decision}\n`);
 
+          if (exitCode !== 0) {
+            console.error(
+              `::error title=Security quality gate::FAIL — Critical ${totals.critical}, High ${totals.high}. Scan completed; reports uploaded as security-reports.`
+            );
+          }
+
           process.exit(exitCode);
           EOF
 
       - name: Upload security reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: security-reports
           path: reports/security/
