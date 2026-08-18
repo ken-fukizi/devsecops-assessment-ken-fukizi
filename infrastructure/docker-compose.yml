@@ -24,7 +24,7 @@ services:
       context: ..
       dockerfile: application/Dockerfile
       args:
-        REACT_APP_API_URL: http://api:8081
+        REACT_APP_API_URL: ""
     image: country-flags-web:secure
     depends_on:
       - api

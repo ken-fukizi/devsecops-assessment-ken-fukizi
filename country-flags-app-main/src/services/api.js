@@ -1,6 +1,8 @@
 import axios from "axios";
 
-const API_URL = `${process.env.REACT_APP_API_URL}/api/countries` || 'http://localhost:8081/api/countries';
+const API_URL = process.env.REACT_APP_API_URL
+    ? `${process.env.REACT_APP_API_URL}/api/countries`
+    : "/api/countries";
 
 export const fetchAllCountries = async () => {
     try {

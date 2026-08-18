@@ -39,7 +39,7 @@ jobs:
         run: |
           docker build \
             --file application/Dockerfile \
-            --build-arg REACT_APP_API_URL=http://api:8081 \
+            --build-arg REACT_APP_API_URL= \
             --tag country-flags-web:secure \
             .
 

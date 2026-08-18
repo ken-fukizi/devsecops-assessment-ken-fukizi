@@ -79,9 +79,9 @@ docker compose -f infrastructure/docker-compose.yml up --build
 ```
 
 - Frontend: http://localhost:8080
-- Backend API (internal Compose network): `api:8081`
+- Backend API is proxied through the frontend at http://localhost:8080/api
 
-The architecture doc calls out that nginx does not yet reverse-proxy `/api`. That is Phase 1 of the roadmap, not an accidental omission from Block 3’s timebox.
+The frontend uses a same-origin `/api` path, which nginx reverse-proxies to the internal API service. This keeps the API private to the Compose network while allowing browser requests to work through the published frontend port.
 
 ## Tooling
 
